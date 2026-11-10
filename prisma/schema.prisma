@@ -1,0 +1,410 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────── Enums ─────────────────────────
+
+enum Role {
+  user
+  tenant
+  owner
+  admin
+  super_admin
+}
+
+enum AccountStatus {
+  Active
+  Suspended
+  Deactivated
+}
+
+enum IdType {
+  passport
+  national_id
+  emirates_id
+  driving_license
+  other
+  philsys
+  umid
+  postal_id
+  sss_id
+  voters_id
+  prc_id
+}
+
+enum PropertyType {
+  apartment_building
+  condominium
+  house
+  townhouse
+  commercial
+}
+
+enum ApprovalStatus {
+  Pending
+  Approved
+  Rejected
+}
+
+enum ListingStatus {
+  Draft
+  Listed
+  Hidden
+  Archived
+}
+
+enum UnitType {
+  studio
+  one_bedroom
+  two_bedroom
+  three_bedroom
+  house
+  room
+}
+
+enum Furnishing {
+  Unfurnished
+  SemiFurnished
+  FullyFurnished
+}
+
+enum Utilities {
+  NotIncluded
+  Partly
+  AllIncluded
+}
+
+enum UnitStatus {
+  Vacant
+  Occupied
+  UnderMaintenance
+}
+
+enum FileKind {
+  property_photo
+  unit_photo
+  ownership_document
+  avatar
+  id_document
+}
+
+enum TenancyStatus {
+  Active
+  Ended
+}
+
+enum RentRequestStatus {
+  Pending
+  Approved
+  Rejected
+  Cancelled
+}
+
+enum AuthTokenType {
+  email_verify
+  password_reset
+}
+
+enum MailStatus {
+  Queued
+  Sent
+  Failed
+}
+
+// ───────────────────────── Users ─────────────────────────
+
+model User {
+  id                 String        @id @default(cuid())
+  userNumber         Int           @unique @default(autoincrement())
+  email              String        @unique
+  passwordHash       String
+  fullName           String
+  phone              String?
+  avatarUrl          String?
+  dateOfBirth        DateTime?     @db.Date
+  address            String?
+  city               String?
+  country            String?
+  idType             IdType?
+  idNumber           String?
+  idDocumentFileId   String?
+  emailVerified      Boolean       @default(false)
+  status             AccountStatus @default(Active)
+  notifyInApp        Boolean       @default(true)
+  notifyEmailUpdates Boolean       @default(true)
+  failedLoginCount   Int           @default(0)
+  firstFailedLoginAt DateTime?
+  lockedUntil        DateTime?
+  tokenVersion       Int           @default(0)
+  lastLoginAt        DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  roles               UserRole[]
+  properties          Property[]     @relation("PropertyOwner")
+  reviewedProperties  Property[]     @relation("PropertyReviewer")
+  tenancies           Tenancy[]      @relation("TenancyTenant")
+  tenanciesCreated    Tenancy[]      @relation("TenancyCreator")
+  rentRequests        RentRequest[]  @relation("RentRequester")
+  rentRequestsDecided RentRequest[]  @relation("RentRequestDecider")
+  notifications       Notification[]
+  authTokens          AuthToken[]
+  loginDevices        LoginDevice[]
+  files               FileAsset[]
+  auditLogs           AuditLog[]
+  announcements       Announcement[]
+}
+
+model UserRole {
+  userId    String
+  role      Role
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, role])
+  @@index([role])
+}
+
+model AuthToken {
+  id        String        @id @default(cuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      AuthTokenType
+  tokenHash String        @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+
+  @@index([userId, type, createdAt])
+}
+
+model LoginDevice {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fingerprint String
+  userAgent   String?
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  @@unique([userId, fingerprint])
+}
+
+// ───────────────────────── Properties ─────────────────────────
+
+model Property {
+  id              String         @id @default(cuid())
+  propertyNumber  Int            @unique @default(autoincrement())
+  name            String
+  propertyType    PropertyType
+  description     String?
+  streetAddress   String
+  city            String
+  province        String
+  postalCode      String?
+  landmark        String?
+  country         String
+  latitude        Float?
+  longitude       Float?
+  yearBuilt       Int?
+  totalFloors     Int?
+  parkingSlots    Int?
+  amenities       String[]
+  ownerId         String
+  owner           User           @relation("PropertyOwner", fields: [ownerId], references: [id])
+  approvalStatus  ApprovalStatus @default(Pending)
+  rejectionReason String?
+  submittedAt     DateTime?
+  reviewedById    String?
+  reviewedBy      User?          @relation("PropertyReviewer", fields: [reviewedById], references: [id])
+  reviewedAt      DateTime?
+  listingStatus   ListingStatus  @default(Draft)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  units Unit[]
+  files FileAsset[]
+
+  @@index([ownerId])
+  @@index([approvalStatus, submittedAt])
+  @@index([listingStatus, city])
+}
+
+model Unit {
+  id                 String     @id @default(cuid())
+  unitSerial         Int        @unique @default(autoincrement())
+  propertyId         String
+  property           Property   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  unitNumber         String
+  floor              Int?
+  unitType           UnitType
+  bedrooms           Int
+  bathrooms          Decimal    @db.Decimal(3, 1)
+  floorArea          Decimal    @db.Decimal(8, 2)
+  furnishing         Furnishing
+  monthlyRent        Decimal    @db.Decimal(12, 2)
+  securityDeposit    Decimal?   @db.Decimal(12, 2)
+  minLeaseMonths     Int?
+  noticePeriodMonths Int?
+  utilities          Utilities  @default(NotIncluded)
+  availableFrom      DateTime?  @db.Date
+  petsAllowed        Boolean    @default(false)
+  smokingAllowed     Boolean    @default(false)
+  features           String[]
+  description        String?
+  status             UnitStatus @default(Vacant)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  tenancies    Tenancy[]
+  rentRequests RentRequest[]
+  files        FileAsset[]
+
+  @@unique([propertyId, unitNumber])
+  @@index([status, monthlyRent])
+}
+
+model FileAsset {
+  id           String    @id @default(cuid())
+  kind         FileKind
+  isPrivate    Boolean   @default(false)
+  storagePath  String
+  thumbPath    String?
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  isCover      Boolean   @default(false)
+  sortOrder    Int       @default(0)
+  propertyId   String?
+  property     Property? @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  unitId       String?
+  unit         Unit?     @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  userId       String?
+  user         User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now())
+
+  @@index([propertyId, kind])
+  @@index([unitId, kind])
+  @@index([userId, kind])
+}
+
+// ───────────────────────── Renting ─────────────────────────
+
+model Tenancy {
+  id          String        @id @default(cuid())
+  unitId      String
+  unit        Unit          @relation(fields: [unitId], references: [id])
+  tenantId    String
+  tenant      User          @relation("TenancyTenant", fields: [tenantId], references: [id])
+  startDate   DateTime      @db.Date
+  endDate     DateTime?     @db.Date
+  status      TenancyStatus @default(Active)
+  createdById String
+  createdBy   User          @relation("TenancyCreator", fields: [createdById], references: [id])
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([tenantId, status])
+  @@index([unitId, status])
+}
+
+model RentRequest {
+  id           String            @id @default(cuid())
+  unitId       String
+  unit         Unit              @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User              @relation("RentRequester", fields: [userId], references: [id])
+  message      String?
+  status       RentRequestStatus @default(Pending)
+  decidedById  String?
+  decidedBy    User?             @relation("RentRequestDecider", fields: [decidedById], references: [id])
+  decidedAt    DateTime?
+  decisionNote String?
+  createdAt    DateTime          @default(now())
+
+  @@index([status, createdAt])
+  @@index([userId])
+  @@index([unitId, status])
+}
+
+// ───────────────────────── Notifications and mail ─────────────────────────
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  message   String
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt, createdAt])
+}
+
+model Announcement {
+  id             String   @id @default(cuid())
+  title          String
+  message        String
+  audience       String
+  sentById       String
+  sentBy         User     @relation(fields: [sentById], references: [id])
+  recipientCount Int      @default(0)
+  createdAt      DateTime @default(now())
+}
+
+model MailJob {
+  id        String     @id @default(cuid())
+  toEmail   String
+  subject   String
+  html      String
+  text      String
+  template  String
+  status    MailStatus @default(Queued)
+  attempts  Int        @default(0)
+  lastError String?
+  runAt     DateTime   @default(now())
+  sentAt    DateTime?
+  createdAt DateTime   @default(now())
+
+  @@index([status, runAt])
+  @@index([toEmail, template, createdAt])
+}
+
+model EmailTemplate {
+  key       String   @id
+  subject   String
+  bodyHtml  String
+  updatedAt DateTime @updatedAt
+}
+
+// ───────────────────────── System ─────────────────────────
+
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String?
+  before    Json?
+  after     Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
+}
